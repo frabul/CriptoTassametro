@@ -42,10 +42,11 @@ class PriceProvider:
     
     def bootstrap(self, other: "PriceProvider") -> None:
         """copy all prices from other to self"""
-        with Session(other.db) as session:
-            for price in session.query(Price).all(): 
-                session.add(price)
-            session.commit()
+        with Session(self.db) as mySession: 
+            with Session(other.db) as session:
+                for price in session.query(Price).all(): 
+                    mySession.add(Price(asset=price.asset, quoteAsset=price.quoteAsset, time=price.time, price=price.price))
+            mySession.commit()
     
     def get_cached_file(self, file_name: str) -> str:
         return os.path.join(self.files_cache_dir, file_name)
