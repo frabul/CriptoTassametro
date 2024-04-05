@@ -19,7 +19,7 @@ class Price(Base):
     asset: Mapped[String] = mapped_column(String, primary_key=True)
     quoteAsset: Mapped[String] = mapped_column(String, primary_key=True)
     time: Mapped[DateTime] = mapped_column(DateTime, primary_key=True)
-    price: Mapped[Float] = mapped_column(Float)
+    price: Mapped[Float] = mapped_column(Float, nullable=True)
 
 
 class PriceProvider:
@@ -40,11 +40,18 @@ class PriceProvider:
         if not os.path.exists(self.files_cache_dir):
             os.makedirs(self.files_cache_dir)
     
+    def bootstrap(self, other: "PriceProvider") -> None:
+        """copy all prices from other to self"""
+        with Session(other.db) as session:
+            for price in session.query(Price).all(): 
+                session.add(price)
+            session.commit()
+    
     def get_cached_file(self, file_name: str) -> str:
         return os.path.join(self.files_cache_dir, file_name)
     
     def _download_close_price(self, symbol: Symbol, time: datetime) -> float:
-        if not symbol.key in self.symbols:
+        if not symbol.key in self.symbols_active:
             return None
 
         # get it from binance
@@ -60,7 +67,8 @@ class PriceProvider:
             # there is no price for this symbol at this time
         return None
 
-    def _get_price_from_db(self, symbol: Symbol, time: datetime) -> float:
+    def _get_price_from_db(self, symbol: Symbol, time: datetime) -> tuple[bool, float]:
+        """ get price of symbol at time if there was a market for symbol or reverse symbol at time"""
         stmt = (
             select(Price)
             .where(Price.asset == symbol.baseAsset)
@@ -72,10 +80,12 @@ class PriceProvider:
         with Session(self.db) as self.current_session:
             resultSet = self.current_session.execute(stmt).scalar_one_or_none()
             if resultSet:
-                return resultSet.price
+                return (True, resultSet.price)  
+            else:
+                return (False, None)
 
     def _download_close_price_from_binance_data(self, symbol: Symbol, time: datetime) -> float:
-        if not symbol.key in self.symbols_active:
+        if not symbol.key in self.symbols:
             return None
         # to download prices here https://data.binance.vision/
         # format https://data.binance.vision/data/spot/monthly/klines/PIVXETH/1m/PIVXETH-1m-2018-02.zip
@@ -138,13 +148,15 @@ class PriceProvider:
         if symbol.baseAsset == symbol.quoteAsset:
             return 1
 
-        price = self._get_price_from_db(symbol, time)
-        if price:
+        indb, price = self._get_price_from_db(symbol, time)
+        if indb:
             return price
 
         # try to get reverse symbol
-        price = self._get_price_from_db(symbol.reverse(), time)
-        if price:
+        indb, price = self._get_price_from_db(symbol.reverse(), time)
+        if indb:
+            if price is None:
+                return None
             return 1 / price
 
         # try to downlaod price from binance
@@ -162,10 +174,7 @@ class PriceProvider:
                 symbol.reverse(), time)
             if not price is None:
                 price = 1 / price
-
-        if price is None:
-            return None
-
+ 
         # insert price into db
         with Session(self.db) as session:
             session.add(
