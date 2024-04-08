@@ -6,6 +6,8 @@ class Portfolio:
     ''' The fist position in the portfolio is always the reference currency and has always price 1'''
 
     def __init__(self, currency='EUR', initalAssets: list[Position] = []):
+        self.position_small_threshold = 1e-4
+        self.price_difference_small_threshold = 1e-3
         self.positions: dict[str, list[Position]] = {}
         self.currency = Position(currency, 0, 1, dt(1970, 1, 1))
         for pos in initalAssets:
@@ -57,11 +59,11 @@ class Portfolio:
             # check if we can merge the asset with the last position
             lastPos = symPosList[-1] if len(symPosList) > 0 else None
             if lastPos is not None:
-                if price == lastPos.price:  # covers the case when price is 0
+                if price == lastPos.price:  # covers the case when both prices are 0
                     lastPos.amount += asset.amount
-                elif abs(lastPos.price - price) * 2 / (lastPos.price + price) < 1e-4:
+                elif abs(lastPos.price - price) * 2 / (lastPos.price + price) < self.price_difference_small_threshold:
                     lastPos.merge(asset.amount, price)  # prices are close enough, merge the position
-                elif abs(asset.amount) < 10e-6:
+                elif abs(asset.amount) < self.position_small_threshold:
                     lastPos.merge(asset.amount, price)  # very small amount merge it
                 else:  # create a new position
                     symPosList.append(Position(asset.symbol, asset.amount, price, time))

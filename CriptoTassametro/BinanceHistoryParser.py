@@ -153,8 +153,6 @@ class ExchangeEntryCombination:
 
 
 # gnerate all possible combination n of items contained in nums
-
-
 def generate_combinations(itemsCount, n):
     indexes = [0 for x in range(0, n)]  # indexes of last group
     i = 0
