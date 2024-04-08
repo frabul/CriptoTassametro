@@ -19,6 +19,7 @@ class Tassametro:
                  pricesDb: PriceProvider,
                  portfolio: Portfolio,
                  include_fee_in_price: bool = True,
+                 deduce_fee: bool = False,
                  capital_gain_logger=dummy_logger(),
                  io_movements_logger=dummy_logger()):
         if not portfolio:
@@ -35,10 +36,13 @@ class Tassametro:
         self.include_fee_in_price = include_fee_in_price
         self.capital_gain_logger = capital_gain_logger
         self.io_movements_logger = io_movements_logger
+        self.deduce_fee = deduce_fee
+        self.fee_paid = 0
 
     def print_state(self) -> None:
         self.portfolio.print()
         print(f"Capital gain: {self.capital_gain} {self.currency}")
+        print(f"Fee paid: {self.fee_paid} {self.currency}")
 
     def process_deposit(self, dep: Deposit):
         # aggiungere amount di asset al portafoglio con pc = prezzo corrente
@@ -90,6 +94,23 @@ class Tassametro:
             self.io_movements_logger.info(f"{gift} - price: {converted.amount / gift.asset.amount} - capital gain: {converted.amount}")
 
     def process_trade(self, trade: ExchangeOperation, logIt: bool = True):
+        # if fee is payd troguh some asset it always needs to be converted to 'currency'
+        #   process the trade ( that will eventually add some capital gain )
+        # then subtract the fee from the capital gain
+        syntethicTrade = None
+        if trade.fee.amount == 0  :
+            fee_in_currency = AssetAmount(self.currency, 0)
+        elif trade.fee.symbol == self.currency:  
+            fee_in_currency = trade.fee 
+            self.portfolio.remove(fee_in_currency) 
+        else: 
+            fee_in_currency = self.prices.convert(trade.fee, self.currency, trade.time)
+            # the fee must be exchanged to 'currency' end the expense is subject to taxation like any other
+            # we will pocess the syntethic trade after adding the bought asset ( as sometimes the fee is payed in the bought asset ) 
+            syntethicTrade = ExchangeOperation(trade.fee,  fee_in_currency, self.null_amount, trade.time)
+        self.fee_paid += fee_in_currency.amount
+        
+
         # a trade is subject to taxation if the asset bought is 'currency'
         # bought asset is added to portfolio
         # sold asset is removed from portfolio
@@ -98,21 +119,7 @@ class Tassametro:
         if trade.bought.symbol == self.currency:
             # in this case the transaction is subject to taxation
             # then the we need to calculate capital gain
-            if trade.fee.symbol == self.currency:
-                # fee in 'currency', just subtract from capital gain and 'currency' position
-                self.capital_gain -= trade.fee.amount
-                # remove the fee from the portfolio
-                self.portfolio.remove(trade.fee)
-            elif trade.fee.amount > 0:
-                # fee was paid using some other asset
-                # convert to 'currency', process the trade ( that will eventually add some capital gain )
-                # then subtract the fee from the capital gain
-                fee_in_currency = self.prices.convert(trade.fee, self.currency, trade.time)
-                # the fee is exchanged to 'currency'
-                syntethicTrade = ExchangeOperation(trade.fee,  fee_in_currency, self.null_amount, trade.time)
-                self.process_trade(syntethicTrade)
-                # remove the fee from the portfolio (as currency)
-                self.portfolio.remove(fee_in_currency)
+            if self.deduce_fee:
                 self.capital_gain -= fee_in_currency.amount
             # add the bought asset to the portfolio
             self.portfolio.add(trade.bought, 1, trade.time)
@@ -121,54 +128,40 @@ class Tassametro:
             for soldPos in sold_positions:
                 # calculate the load price in 'currency'
                 self.capital_gain += soldPos.amount * (price_in_currency - soldPos.price)
-        else:
-            # we bought an asset so we need to calculate the load price in 'currency' ( which will include the fee )
-            # and add the new position to the list
-            # the fee is not instantly calculated as a loss but it is included in the load price
-            if trade.fee.symbol == trade.bought.symbol or trade.fee.amount == 0:
-                # simplified case, fee is paid in the same asset that we bought
-                for soldPos in sold_positions:
-                    fee_pertinent = trade.fee.amount * (soldPos.amount / trade.sold.amount)
-                    # bought amount is reduced by the fee
-                    bought_pertinent = trade.bought.amount * (soldPos.amount / trade.sold.amount) - fee_pertinent
-                    price_in_currency = soldPos.amount * soldPos.price / bought_pertinent
-                    # add the bought asset to the portfolio
-                    self.portfolio.add(AssetAmount(trade.bought.symbol, bought_pertinent), price_in_currency, trade.time)
-            else:
-                # fee needs to be sold to 'currency' ( which will yield a capital gain )
-                for soldPos in sold_positions:
-                    # exchange the fee to 'currency' and remove from portfolio
-                    fee_pertinent = AssetAmount(
-                        trade.fee.symbol,
-                        trade.fee.amount * (soldPos.amount / trade.sold.amount))
-                    fee_in_currency = self.prices.convert(fee_pertinent, self.currency, trade.time)
-                    syntethicTrade = ExchangeOperation(fee_pertinent, fee_in_currency, self.null_amount, trade.time)
-                    self.process_trade(syntethicTrade)
-                    # remove the fee from the portfolio
-                    self.portfolio.remove(fee_in_currency)
+        else: 
+            for soldPos in sold_positions:
+                # exchange the fee to 'currency' and remove from portfolio
+                fee_pertinent = AssetAmount(
+                    fee_in_currency.symbol,
+                    fee_in_currency.amount * (soldPos.amount / trade.sold.amount))
+                
+                spent_in_currency = soldPos.amount * soldPos.price
+                if self.deduce_fee:
                     if self.include_fee_in_price:
                         # calculate the load price in 'currency' ( which includes the fee )
-                        spent_in_currency = soldPos.amount * soldPos.price + fee_in_currency.amount
-                        bought_pertinent = trade.bought.amount * (soldPos.amount / trade.sold.amount)
-                        price_in_currency = spent_in_currency / bought_pertinent
+                        spent_in_currency += fee_pertinent.amount
                     else:
-                        # v2 calculate the price without considering the fee
-                        self.capital_gain -= fee_in_currency.amount
-                        spent_in_currency = soldPos.amount * soldPos.price
-                        bought_pertinent = trade.bought.amount * (soldPos.amount / trade.sold.amount)
-                        price_in_currency = spent_in_currency / bought_pertinent
+                        self.capital_gain -= fee_pertinent.amount
+                bought_pertinent = trade.bought.amount * (soldPos.amount / trade.sold.amount)
+                price_in_currency = spent_in_currency / bought_pertinent
 
-                    # add the bought asset to the portfolio
-                    self.portfolio.add(AssetAmount(trade.bought.symbol, bought_pertinent), price_in_currency, trade.time)
-
+                # add the bought asset to the portfolio
+                self.portfolio.add(AssetAmount(trade.bought.symbol, bought_pertinent), price_in_currency, trade.time)
+        # finally process the syntethic trade
+        if syntethicTrade is not None:
+            self.process_trade(syntethicTrade) 
+            self.portfolio.remove(fee_in_currency)
+            
     def process_fee_payment(self, fee: FeePayment):
         # the amount converted to 'currency' and deducted from capital gains
         fee_in_currency = self.prices.convert(fee.asset, self.currency, fee.time)
         synthetic_trade = ExchangeOperation(fee.asset, fee_in_currency, self.null_amount, fee.time)
         self.process_trade(synthetic_trade)
         self.portfolio.remove(fee_in_currency)
-        self.capital_gain -= fee_in_currency.amount
-
+        self.fee_paid += fee_in_currency.amount
+        if self.deduce_fee:
+            self.capital_gain -= fee_in_currency.amount
+        
     def process_margin_loan(self, ml: MarginLoan):
         converted = self.prices.convert(ml.asset, self.currency, ml.time)
         price = converted.amount / ml.asset.amount
