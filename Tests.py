@@ -14,14 +14,14 @@ class TestTassametro(unittest.TestCase):
     def setUp(self) -> None:
         self.currency = "EUR"
         self.portfolio = Portfolio()
-        self.tassametro = Tassametro(dt(2021, 1, 1), dt(2021, 12, 31), pricesDb, self.portfolio)
+        self.tassametro = Tassametro(dt(2021, 1, 1), dt(2021, 12, 31), pricesDb, self.portfolio, deduce_fee=True)
         print("")
 
     def print_state(self) -> None:
         self.portfolio.print()
         print(f"Capital gain: {self.tassametro.capital_gain} EUR")
 
-    def test_fee_paid_from_bought(self):
+    def test_a_fee_paid_from_bought(self):
         opers = [
             ExchangeOperation(AM("EUR", 10000), AM("BTC", 1), AM("BTC", 0.001), dt(2023, 1, 1)),
             ExchangeOperation(AM("BTC", 0.989), AM("EUR", 20000), AM("BTC", 0.01), dt(2023, 12, 1))
@@ -34,7 +34,7 @@ class TestTassametro(unittest.TestCase):
         self.assertEqual(len(self.portfolio.get_positions(min_value=0.001)), 1)
         self.assertAlmostEqual(self.portfolio.get_total("EUR"), self.tassametro.capital_gain)
 
-    def test_fee_paid_from_sold(self):
+    def test_b_fee_paid_from_sold(self):
         opers = [
             ExchangeOperation(AM("EUR", 10000), AM("BTC", 1), AM("EUR", 100), dt(2023, 1, 1)),
             ExchangeOperation(AM("BTC", 1), AM("EUR", 20000), AM("EUR", 200), dt(2023, 12, 1))
@@ -46,7 +46,7 @@ class TestTassametro(unittest.TestCase):
         self.assertEqual(len(self.portfolio.get_positions(min_value=0.001)), 1)
         self.assertAlmostEqual(self.portfolio.get_total("EUR"), self.tassametro.capital_gain)
 
-    def test_double_exchange_1(self):
+    def test_c_double_exchange(self):
         opers = [
             ExchangeOperation(AM("EUR", 10000), AM("BTC", 1),     AM("EUR", 100), dt(2023, 1, 1)),  # 1btc = 10000eur
             ExchangeOperation(AM("BTC", 0.1),   AM("BNB", 10),    AM("BNB", 0.1), dt(2023, 2, 1)),  # 1bnb = 100eur
@@ -60,7 +60,7 @@ class TestTassametro(unittest.TestCase):
         self.assertEqual(len(self.portfolio.get_positions(min_value=0.001)), 1)
         self.assertAlmostEqual(self.portfolio.get_total("EUR"), self.tassametro.capital_gain)
 
-    def test_double_exchange_2(self):
+    def test_d_double_exchange(self):
         opers = [
             ExchangeOperation(AM("EUR", 5000),  AM("BTC", 0.5),   AM("EUR", 100), dt(2023, 1, 1)),  # 1btc = 10000eur
             ExchangeOperation(AM("EUR", 7500),  AM("BTC", 0.5),   AM("EUR", 100), dt(2023, 1, 2)),  # 1btc = 15000eur
@@ -75,7 +75,7 @@ class TestTassametro(unittest.TestCase):
         self.assertEqual(len(self.portfolio.get_positions(min_value=0.0001)), 1)
         self.assertAlmostEqual(self.portfolio.get_total("EUR"), self.tassametro.capital_gain)
 
-    def test_double_exchange_3(self):
+    def test_e_double_exchange(self):
         opers = [
             ExchangeOperation(AM("EUR", 10000), AM("BTC", 0.5),   AM("EUR", 100),   dt(2023, 1, 1)),  # 1btc = 10000eur
             ExchangeOperation(AM("EUR", 15000), AM("BTC", 0.5),   AM("EUR", 100),    dt(2023, 1, 2)),  # 1btc = 20000eur
@@ -90,7 +90,7 @@ class TestTassametro(unittest.TestCase):
         self.assertEqual(len(self.portfolio.get_positions(min_value=0.001)), 1)
         self.assertAlmostEqual(self.portfolio.get_total("EUR"), self.tassametro.capital_gain)
 
-    def test_double_exchange_4(self):
+    def test_f_double_exchange(self):
         opers = [
             ExchangeOperation(AM("EUR", 10000),           AM("BTC", 0.5),   AM("EUR", 100),        dt(2023, 1, 1)),  # 1btc = 20200eur
             ExchangeOperation(AM("EUR", 15000),           AM("BTC", 0.5),   AM("EUR", 100),        dt(2023, 1, 2)),  # 1btc = 30200eur
