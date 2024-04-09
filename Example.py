@@ -34,7 +34,7 @@ prices = PriceProvider('./data/prices.sqlite')
 # first parse binance csv files
 # if the file is huge thuis is a long process, it can be interrupted and resumed later
 # as everything is saved in a database
-operationsDb = OperationsDatabase('./data/prices.sqlite')
+operationsDb = OperationsDatabase('./data/example_operations.sqlite')
 opParser = BinanceHistoryParser(prices, operationsDb)
 historyEntries = parse_files(["./binance_history_example.csv"])
 opParser.parse_operations(historyEntries, "binance_history_example.csv")
@@ -51,7 +51,8 @@ tassametro = Tassametro(datetime(2023, 1, 1),
                         datetime(2024, 1, 1),
                         prices, portfolio=initialPortfolio,
                         capital_gain_logger=capital_gain_logger,
-                        io_movements_logger=io_movements_logger)
+                        io_movements_logger=io_movements_logger,
+                        deduce_fee=True)
 operations = operationsDb.get_operations()
 tassametro.process_operations(operations)
 tassametro.print_state()
