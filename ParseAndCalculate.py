@@ -50,7 +50,7 @@ if __name__ == "__main__":
     # first parse binance csv files
     # if the file is huge thuis is a long process, it can be interrupted and resumed later
     # as everything is saved in a database
-    operationsDb = OperationsDatabase('./data/prices.sqlite')
+    operationsDb = OperationsDatabase(f'./data/{session_name}_operations.sqlite')
     opParser = BinanceHistoryParser(prices, operationsDb)
     historyEntries = parse_files([binance_history_file])
     opParser.parse_operations(historyEntries, binance_history_file)
