@@ -56,16 +56,17 @@ class PriceProvider:
             return None
 
         # get it from binance
+        look_back = 60 * 6  # 6 hours
         klines = self.client.klines(
             symbol=f"{symbol.baseAsset}{symbol.quoteAsset}",
             interval="1m",
-            startTime=int((time.timestamp() - 60 * 60 * 12) * 1000),
+            startTime=int((time.timestamp() - 60 * look_back) * 1000),
             endTime=int(time.timestamp() * 1000),
-            limit=60*12,
+            limit=look_back+1,
         )
         if len(klines) > 0:
             return float(klines[-1][4])
-            # there is no price for this symbol at this time
+        # there is no price for this symbol at this time
         return None
 
     def _get_price_from_db(self, symbol: Symbol, time: datetime) -> tuple[bool, float]:
