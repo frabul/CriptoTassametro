@@ -3,7 +3,7 @@ from CriptoTassametro.BinanceHistoryParser import BinanceHistoryParser, parse_fi
 from CriptoTassametro.PriceProvider import PriceProvider
 from CriptoTassametro.OperationsDatabase import OperationsDatabase
 from CriptoTassametro.Portfolio import Portfolio, Position
-from CriptoTassametro.Tassametro import Tassametro
+from CriptoTassametro.Tassametro import Tassametro, setup_logger
 import os
 from datetime import datetime
 
@@ -27,20 +27,8 @@ if __name__ == "__main__":
     # assure that data directory exists
     if not os.path.exists('./data'):
         os.makedirs('./data')
+        
     # create loggers
-    formatter = logging.Formatter('%(message)s')
-
-
-    def setup_logger(name, log_file, level=logging.INFO):
-        """To setup as many loggers as you want"""
-        handler = logging.FileHandler(log_file)
-        handler.setFormatter(formatter)
-        logger = logging.getLogger(name)
-        logger.setLevel(level)
-        logger.addHandler(handler)
-        return logger
-
-
     capital_gain_logger = setup_logger('capital_gain_logger', f'./data/{session_name}_capital_gain.log')
     io_movements_logger = setup_logger('io', f'./data/{session_name}_IO_movements.log')
 

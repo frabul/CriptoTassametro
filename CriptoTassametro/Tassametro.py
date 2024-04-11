@@ -204,10 +204,15 @@ class Tassametro:
             if len(buffer) > 1:
                 buffer.sort(key=lambda x: 0 if isinstance(x, MarginLoan) else 2 if isinstance(x, MarginRepayment) else 1)
             for op in buffer:
-                initial_capital_gain = self.capital_gain
-                cnt += 1
-                print(f'Processing {cnt}/{total}: {op}')
-                self.process_operation(op)
-                cap_gain_for_op = self.capital_gain - initial_capital_gain
-                if cap_gain_for_op != 0:
-                    self.capital_gain_logger.info(f'{op} - capital gain: {cap_gain_for_op}')
+# create loggers
+formatter = logging.Formatter('%(message)s')
+
+
+def setup_logger(name, log_file, level=logging.INFO):
+    """To setup as many loggers as you want"""
+    handler = logging.FileHandler(log_file)
+    handler.setFormatter(formatter)
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+    return logger
