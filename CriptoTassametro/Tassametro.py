@@ -19,7 +19,8 @@ class Tassametro:
                  pricesDb: PriceProvider,
                  portfolio: Portfolio,
                  include_fee_in_price: bool = True,
-                 deduce_fee: bool = False,
+                 deduce_fee: bool = True,
+                 end_of_day_prices_for_fees: bool = True,  # use closing price from last day for fees (speeds up calculation)
                  capital_gain_logger=dummy_logger(),
                  io_movements_logger=dummy_logger()):
         if not portfolio:
@@ -33,10 +34,11 @@ class Tassametro:
         self.capital_gain = 0
         self.null_amount = AssetAmount(self.currency, 0)
         self.operations_count = 0
-        self.include_fee_in_price = include_fee_in_price
         self.capital_gain_logger = capital_gain_logger
         self.io_movements_logger = io_movements_logger
         self.deduce_fee = deduce_fee
+        self.end_of_day_prices_for_fees = end_of_day_prices_for_fees
+        self.include_fee_in_price = include_fee_in_price
         self.fee_paid = 0
 
     def print_state(self) -> None:
@@ -49,7 +51,9 @@ class Tassametro:
         sym = Symbol(dep.asset.symbol, self.currency)
         price = self.prices.get_price(sym, dep.time)
         if price is None:
-            raise ValueError(f"Price not found for {sym} at {dep.time}")
+            print(f"Price not found for {sym} at {dep.time}")
+            self.io_movements_logger.info(f"Price not found for {sym} at {dep.time}, considering 0")
+            price = 0
         self.portfolio.add(
             dep.asset,
             price,
@@ -61,14 +65,16 @@ class Tassametro:
         # transaction is subejct to taxation if the asset is not EUR
         if withdraw.asset.symbol != self.currency:
             # first convert asset to 'currency' and then remove the amount
-            sym = Symbol(withdraw.asset.symbol, self.currency)
-            # create a synthetic trade
             asset_in_currency = self.prices.convert(withdraw.asset, self.currency, withdraw.time)
-            if asset_in_currency is None:
+            if asset_in_currency is None or asset_in_currency.amount is None:
                 print(f"{withdraw.time} - Price not found for Withdrawal {withdraw.asset}")
                 self.io_movements_logger.info(f"{withdraw.time} - Price not found for Withdrawal {withdraw.asset} ")
                 self.portfolio.remove(withdraw.asset)
                 return
+            if asset_in_currency.amount == 0:
+                print(f"Unable to remove {withdraw.asset} from portfolio")
+                return
+            # create a synthetic trade
             trade = ExchangeOperation(withdraw.asset, asset_in_currency, self.null_amount, withdraw.time)
             self.process_trade(trade, logIt=False)  # this trade will yield eventual capital gains
             self.process_withdrawal(Withdrawal(asset_in_currency.symbol, asset_in_currency.amount, withdraw.time), logIt=False)
@@ -98,43 +104,49 @@ class Tassametro:
         #   process the trade ( that will eventually add some capital gain )
         # then subtract the fee from the capital gain
         syntethicTrade = None
-        if trade.fee.amount == 0  :
+        if trade.fee.amount == 0:
             fee_in_currency = AssetAmount(self.currency, 0)
-        elif trade.fee.symbol == self.currency:  
-            fee_in_currency = trade.fee 
-            self.portfolio.remove(fee_in_currency) 
-        else: 
-            fee_in_currency = self.prices.convert(trade.fee, self.currency, trade.time)
+        elif trade.fee.symbol == self.currency:
+            fee_in_currency = trade.fee
+            self.portfolio.remove(fee_in_currency)
+        else:
+            conversion_time = trade.time
+            if self.end_of_day_prices_for_fees:
+                conversion_time = trade.time.replace(hour=0, minute=0, second=0, microsecond=0)  # speed up conversion by taking a price approximated by hour
+            fee_in_currency = self.prices.convert(trade.fee, self.currency, conversion_time)
             # the fee must be exchanged to 'currency' end the expense is subject to taxation like any other
-            # we will pocess the syntethic trade after adding the bought asset ( as sometimes the fee is payed in the bought asset ) 
+            # we will pocess the syntethic trade after adding the bought asset ( as sometimes the fee is payed in the bought asset )
             syntethicTrade = ExchangeOperation(trade.fee,  fee_in_currency, self.null_amount, trade.time)
         self.fee_paid += fee_in_currency.amount
-        
 
         # a trade is subject to taxation if the asset bought is 'currency'
         # bought asset is added to portfolio
         # sold asset is removed from portfolio
         # fee is removed from portfolio
         sold_positions = self.portfolio.remove(trade.sold)
-        if trade.bought.symbol == self.currency:
+        if trade.bought.symbol in ["EUR", "USD", "USDT", "USDC", "BUSD", "DAI"]:
             # in this case the transaction is subject to taxation
             # then the we need to calculate capital gain
             if self.deduce_fee:
                 self.capital_gain -= fee_in_currency.amount
             # add the bought asset to the portfolio
-            self.portfolio.add(trade.bought, 1, trade.time)
+            bought_in_currency = self.prices.convert(trade.bought, self.currency, trade.time)
+            # the bought asset is added with its actual price in 'currency'
+            self.portfolio.add(trade.bought, bought_in_currency.amount / trade.bought.amount, trade.time)
             # calculate the capital gain
-            price_in_currency = trade.bought.amount / trade.sold.amount
+            price_in_currency = bought_in_currency.amount / trade.sold.amount
             for soldPos in sold_positions:
                 # calculate the load price in 'currency'
                 self.capital_gain += soldPos.amount * (price_in_currency - soldPos.price)
-        else: 
+        else:
             for soldPos in sold_positions:
+                if soldPos.amount == 0:
+                    continue
                 # exchange the fee to 'currency' and remove from portfolio
                 fee_pertinent = AssetAmount(
                     fee_in_currency.symbol,
                     fee_in_currency.amount * (soldPos.amount / trade.sold.amount))
-                
+
                 spent_in_currency = soldPos.amount * soldPos.price
                 if self.deduce_fee:
                     if self.include_fee_in_price:
@@ -149,9 +161,9 @@ class Tassametro:
                 self.portfolio.add(AssetAmount(trade.bought.symbol, bought_pertinent), price_in_currency, trade.time)
         # finally process the syntethic trade
         if syntethicTrade is not None:
-            self.process_trade(syntethicTrade) 
+            self.process_trade(syntethicTrade)
             self.portfolio.remove(fee_in_currency)
-            
+
     def process_fee_payment(self, fee: FeePayment):
         # the amount converted to 'currency' and deducted from capital gains
         fee_in_currency = self.prices.convert(fee.asset, self.currency, fee.time)
@@ -161,7 +173,7 @@ class Tassametro:
         self.fee_paid += fee_in_currency.amount
         if self.deduce_fee:
             self.capital_gain -= fee_in_currency.amount
-        
+
     def process_margin_loan(self, ml: MarginLoan):
         converted = self.prices.convert(ml.asset, self.currency, ml.time)
         price = converted.amount / ml.asset.amount
@@ -204,6 +216,18 @@ class Tassametro:
             if len(buffer) > 1:
                 buffer.sort(key=lambda x: 0 if isinstance(x, MarginLoan) else 2 if isinstance(x, MarginRepayment) else 1)
             for op in buffer:
+                try:
+                    initial_capital_gain = self.capital_gain
+                    cnt += 1
+                    print(f'Processing {cnt}/{total}: {op}')
+                    self.process_operation(op)
+                    cap_gain_for_op = self.capital_gain - initial_capital_gain
+                    if cap_gain_for_op != 0:
+                        self.capital_gain_logger.info(f'{op} - capital gain: {cap_gain_for_op}')
+                except Exception as e:
+                    raise Exception(f"Error processing operation {op}:\n   {e}")
+
+
 # create loggers
 formatter = logging.Formatter('%(message)s')
 
