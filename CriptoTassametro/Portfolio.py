@@ -4,7 +4,7 @@ from .Components import *
 
 class Portfolio:
     ''' The fist position in the portfolio is always the reference currency and has always price 1'''
-
+    small_amount = 1e-7
     def __init__(self, currency='EUR', initalAssets: list[Position] = []):
         self.position_small_threshold = 1e-4
         self.price_difference_small_threshold = 1e-3
@@ -41,12 +41,14 @@ class Portfolio:
             if asset.amount <= 0:
                 break
 
-        if abs(asset.amount) > 1e-7:
+        if abs(asset.amount) > Portfolio.small_amount:
             raise ValueError(f"Not enough {asset.symbol} in the portfolio, remaining {asset.amount}")
-
+        if len(retVal) == 0:
+            retVal.append(Position(asset.symbol, 0, 0, dt(1970, 1, 1)))
         return retVal
 
     def add(self, asset: AssetAmount, price: float, time: dt):
+        assert price is not None
         '''add an amount of asset to the portfolio'''
         if asset.symbol == self.currency.symbol:
             if price != 1:
