@@ -40,11 +40,21 @@ class PriceProvider:
         if not os.path.exists(self.files_cache_dir):
             os.makedirs(self.files_cache_dir)
     
-    def bootstrap(self, other: "PriceProvider") -> None:
+    def merge(self, other: "PriceProvider") -> None:
         """copy all prices from other to self"""
         with Session(self.db) as mySession: 
             with Session(other.db) as session:
                 for price in session.query(Price).all(): 
+                    # check if the price is already in the db
+                    stmt = (
+                        select(Price)
+                        .where(Price.asset == price.asset)
+                        .where(Price.quoteAsset == price.quoteAsset)
+                        .where(Price.time == price.time)
+                        .limit(1)
+                    )
+                    if mySession.execute(stmt).scalar_one_or_none():
+                        continue
                     mySession.add(Price(asset=price.asset, quoteAsset=price.quoteAsset, time=price.time, price=price.price))
             mySession.commit()
     
@@ -95,7 +105,7 @@ class PriceProvider:
         # then use the csv to get the price
         # remove one minute from time to get the month because for the first minute of the month we need the last price of previous month
         monthTime = time - timedelta(minutes=1)
-        url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol.baseAsset}{symbol.quoteAsset}/1m/{symbol.baseAsset}{symbol.quoteAsset}-1m-{time.year}-{monthTime.month:02}.zip"
+        url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol.baseAsset}{symbol.quoteAsset}/1m/{symbol.baseAsset}{symbol.quoteAsset}-1m-{monthTime.year}-{monthTime.month:02}.zip"
         # download the zip
         zipFIle = self.get_cached_file(
             f"{symbol.baseAsset}{symbol.quoteAsset}-1m-{monthTime.year}-{monthTime.month:02}.zip")
