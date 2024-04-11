@@ -95,7 +95,7 @@ class PriceProvider:
         # then use the csv to get the price
         # remove one minute from time to get the month because for the first minute of the month we need the last price of previous month
         monthTime = time - timedelta(minutes=1)
-        url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol.baseAsset}{symbol.quoteAsset}/1m/{symbol.baseAsset}{symbol.quoteAsset}-1m-{time.year}-{time.month:02}.zip"
+        url = f"https://data.binance.vision/data/spot/monthly/klines/{symbol.baseAsset}{symbol.quoteAsset}/1m/{symbol.baseAsset}{symbol.quoteAsset}-1m-{time.year}-{monthTime.month:02}.zip"
         # download the zip
         zipFIle = self.get_cached_file(
             f"{symbol.baseAsset}{symbol.quoteAsset}-1m-{monthTime.year}-{monthTime.month:02}.zip")
