@@ -8,7 +8,7 @@ from .Components import *
 from .PriceProvider import PriceProvider
 from .OperationsDatabase import OperationsDatabase
 
-PRICE_ERROR_LIMIT = 0.2
+PRICE_ERROR_LIMIT = 0.5
 
 
 class HistoryEntryType(Enum):
@@ -138,8 +138,8 @@ class ExchangeEntryCombination:
         return self._error
 
     def to_operation(self) -> ExchangeOperation:
-        if self.error(None) > 2:
-            raise ValueError("Cannot convert to operation, error too high")
+        if self.error(None) > 5:
+            raise ValueError(f"Cannot convert to operation, error too high ( {self.error(None)} )")
         fee = AssetAmount(self.buy.coin, 0)
         if self.fee is not None:
             fee = AssetAmount(self.fee.coin, abs(self.fee.change))
@@ -194,12 +194,12 @@ class BinanceHistoryParser:
     exchange_fee_types = [HistoryEntryType.Fee,
                           HistoryEntryType.Transaction_Fee]
     gift_operation_types = [HistoryEntryType.Binance_Card_Cashback,
-                            HistoryEntryType.Distribution,
                             HistoryEntryType.Swap_Farming_Rewards,
                             HistoryEntryType.Mission_Reward_Distribution,
                             HistoryEntryType.Realized_Profit_and_Loss,
                             HistoryEntryType.Simple_Earn_Flexible_Interest,
-                            HistoryEntryType.Airdrop_Assets
+                            HistoryEntryType.Airdrop_Assets,
+                            HistoryEntryType.Staking_Rewards
                             ]
     ignore_types = [HistoryEntryType.Asset_Recovery,
                     HistoryEntryType.Sub_account_Transfer,
@@ -227,19 +227,24 @@ class BinanceHistoryParser:
         self.completed = False
         self.history_file = fileName
         while len(self.entries) > 0 or len(self.buffer) > 0:
-            self.load_buffer()
-            self.process_exchange_operations()
-            self.process_small_assets_exchange_operations()
-            self.process_simple_operations()
-            if len(self.buffer) > 0:
-                raise ValueError("Buffer not empty")
+            date = self.entries[-1].utc_time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                self.load_buffer()
+                self.process_exchange_operations()
+                self.process_small_assets_exchange_operations()
+                self.process_simple_operations()
+                if len(self.buffer) > 0:
+                    raise ValueError("Buffer not empty")
 
-            print(f"Processed {self.current_entry} of {fileName}")
-            self.operations_db.add_operations(self.new_operations)
-            self.operations_db.set_parsed(fileName, self.current_entry)
-            self.operations_db.save()
-            # add operations to db
-            self.new_operations.clear()
+                print(f"Processed {self.current_entry} ({date})  of {fileName}")
+                # add operations to db
+                self.operations_db.add_operations(self.new_operations)
+                self.operations_db.set_parsed(fileName, self.current_entry)
+                self.operations_db.save()
+                self.new_operations.clear()
+            except Exception as e:
+                print(f"Exception processing at {date}: {e}")
+                raise e
 
     def load_buffer(self):
         if len(self.entries) < 1:
@@ -299,6 +304,12 @@ class BinanceHistoryParser:
             dummyFee.user_id = None
             fees.append(dummyFee)
 
+        # if there are only fees then emit them as operations
+        if len(buys) == 0 and len(sells) == 0 and len(fees) > 0:
+            for fee in fees:
+                self.emit_operation(FeePayment(fee.coin, fee.change, fee.utc_time))
+            self.buffer = [entry for entry in self.buffer if entry not in fees]
+            return
         if len(buys) != len(sells) or len(fees) != len(buys):
             raise ValueError("Buys and sells do not match")
         if len(buys) == 0:
@@ -357,10 +368,8 @@ class BinanceHistoryParser:
         buysTaken = []
         sellsTaken = []
 
-        if len(buys) != len(sells):
-            raise ValueError("Buys and sells do not match")
-        if len(buys) == 0:
-            return
+        
+      
         if len(buys) == 1:
             self.emit_operation(
                 ExchangeEntryCombination(buys[0], sells[0], None, 0).to_operation())
@@ -380,29 +389,14 @@ class BinanceHistoryParser:
                     sellsTaken.append(sell)
                     break
 
-        # if there are still buys and sells, try to match them by price
-        # produce all possible combinations of (buys, sells)
-        combinations: list[ExchangeEntryCombination] = []
-        n = len(buys)
-        for comb_indexes in generate_buy_sell_fee_combinations(n):
-            buy = buys[comb_indexes[0]]
-            sell = sells[comb_indexes[1]]
-            comb = ExchangeEntryCombination(buy, sell)
-            combinations.append(comb)
-        combinations.sort(key=lambda comb: comb.error(self.price_provider))
-
-        # pick the best n compatibles combinations
-        # they are compatible if they do not share the same buy, sell or fee
-        for comb in combinations:
-            if not (comb.buy in buysTaken or comb.sell in sellsTaken):
-                chosen.append(comb)
-                buysTaken.append(comb.buy)
-                sellsTaken.append(comb.sell)
-                if len(chosen) == n:
-                    break
-        # create operations from chosen combinations
-        for comb in chosen:
-            self.emit_operation(comb.to_operation())
+        # if there are still buys and sells, because the matching is too complicated
+        # and the amounts are small let's just consider everything as withdraw/deposit
+        for buy in buys:
+            self.emit_operation(Deposit(buy.coin, buy.change, buy.utc_time))
+            buysTaken.append(buy)
+        for sell in sells:
+            self.emit_operation(Withdrawal(sell.coin, sell.change, sell.utc_time))
+            sellsTaken.append(sell)
 
         # remove from the buffer the entries that were used
         self.buffer = [entry for entry in self.buffer
@@ -435,12 +429,33 @@ class BinanceHistoryParser:
                     op = Withdrawal(e.coin, -e.change, e.utc_time)
                 self.emit_operation(op)
             elif e.operation == HistoryEntryType.Margin_Loan:
-                self.emit_operation(
-                    MarginLoan(e.coin, e.change, e.utc_time))
+                self.emit_operation(MarginLoan(e.coin, e.change, e.utc_time))
             elif e.operation == HistoryEntryType.Margin_Repayment:
                 assert e.change < 0
-                self.emit_operation(
-                    MarginRepayment(e.coin, -e.change, e.utc_time))
+                self.emit_operation(MarginRepayment(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Funding_Fee:
+                assert e.change < 0
+                self.emit_operation(FeePayment(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Liquid_Swap_Add_Sell:
+                self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Liquidity_Farming_Remove:
+                self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Token_Swap_Rebranding:
+                self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Distribution:
+                if ' to ' in e.remark and e.change > 0:
+                    self.emit_operation(Deposit(e.coin, e.change, e.utc_time))  # coin swapped to
+                elif 'drop' in e.remark and e.change > 0: # airdrop
+                    self.emit_operation(GiftOperation(e.coin, e.change, e.utc_time))
+                elif e.change > 0:
+                    self.emit_operation(Deposit(e.coin, e.change, e.utc_time))   
+                else:
+                    self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Simple_Earn_Flexible_Subscription:
+                assert e.change < 0
+                self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Simple_Earn_Flexible_Redemption:
+                self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
             else:
                 self.buffer.append(e)  # reinsert the entry in the buffer
 
@@ -462,3 +477,23 @@ def parse_files(files: list[str], max_lines=None) -> list[HistoryEntry]:
                     if max_lines is not None and len(movements) >= max_lines:
                         return movements
     return movements
+
+
+class Wallet:
+    ''' A container of assets ''' 
+    def __init__(self) -> None:
+        self.assets: dict[str, AssetAmount] = {}
+
+    def add(self, asset: AssetAmount):
+        if asset.symbol in self.assets:
+            self.assets[asset.symbol].amount += asset.amount
+        else:
+            self.assets[asset.symbol] = asset
+
+    def print(self, min_amount = 1e-9) -> None:
+        assets : list[AssetAmount] = [asset for asset in self.assets.values()]
+        assets.sort(key=lambda x: x.amount, reverse=True)
+        for asset in assets:
+            if abs(asset.amount) > min_amount:
+                print(asset)
+
