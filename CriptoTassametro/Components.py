@@ -111,6 +111,6 @@ class Position:
         return Position(self.symbol, amount, self.price, self.creationTime)
 
     def merge(self, amount: float, price: float):
-        self.amount += amount
         # price is weighted average
         self.price = (self.price * self.amount + price * amount) / (self.amount + amount)
+        self.amount += amount
