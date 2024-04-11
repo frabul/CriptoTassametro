@@ -21,6 +21,9 @@ class Symbol:
     def reverse(self):
         return Symbol(self.quoteAsset, self.baseAsset)
 
+    def __str__(self) -> str:
+        return self.key
+
 
 class Operation:
     def __init__(self, time: datetime):
