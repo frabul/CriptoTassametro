@@ -51,7 +51,8 @@ class HistoryEntryType(Enum):
     Transaction_Related = 'Transaction Related'
     Staking_Rewards = 'Staking Rewards'
     Token_Swap_Rebranding = 'Token Swap - Redenomination/Rebranding'
-
+    Fiat_Deposit = 'Fiat Deposit'
+    Crypto_Box = 'Crypto Box'
     @staticmethod
     def contains(value):
         return value in HistoryEntryType.__members__.keys()
@@ -199,7 +200,8 @@ class BinanceHistoryParser:
                             HistoryEntryType.Realized_Profit_and_Loss,
                             HistoryEntryType.Simple_Earn_Flexible_Interest,
                             HistoryEntryType.Airdrop_Assets,
-                            HistoryEntryType.Staking_Rewards
+                            HistoryEntryType.Staking_Rewards,
+                            HistoryEntryType.Crypto_Box
                             ]
     ignore_types = [HistoryEntryType.Asset_Recovery,
                     HistoryEntryType.Sub_account_Transfer,
@@ -439,6 +441,8 @@ class BinanceHistoryParser:
             elif e.operation == HistoryEntryType.Liquid_Swap_Add_Sell:
                 self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
             elif e.operation == HistoryEntryType.Liquidity_Farming_Remove:
+                self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
+            elif e.operation == HistoryEntryType.Fiat_Deposit:
                 self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
             elif e.operation == HistoryEntryType.Token_Swap_Rebranding:
                 self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
