@@ -18,7 +18,6 @@ class Tassametro:
                  endTime: dt,
                  pricesDb: PriceProvider,
                  portfolio: Portfolio,
-                 include_fee_in_price: bool = True,
                  deduce_fee: bool = True,
                  end_of_day_prices_for_fees: bool = True,  # use closing price from last day for fees (speeds up calculation)
                  capital_gain_logger=dummy_logger(),
@@ -32,17 +31,21 @@ class Tassametro:
         self.currency = "EUR"  # reference currency
         self.portfolio = portfolio
         self.capital_gain = 0
+        self.total_sold = 0
+        self.total_bought = 0
         self.null_amount = AssetAmount(self.currency, 0)
         self.operations_count = 0
         self.capital_gain_logger = capital_gain_logger
         self.io_movements_logger = io_movements_logger
         self.deduce_fee = deduce_fee
         self.end_of_day_prices_for_fees = end_of_day_prices_for_fees
-        self.include_fee_in_price = include_fee_in_price
         self.fee_paid = 0
 
     def print_state(self) -> None:
         self.portfolio.print()
+        print(f"----- Capital Gain Report -----")
+        print(f"Total bought: {self.total_bought} {self.currency}")
+        print(f"Total sold: {self.total_sold} {self.currency}")
         print(f"Capital gain: {self.capital_gain} {self.currency}")
         print(f"Fee paid: {self.fee_paid} {self.currency}")
 
@@ -95,6 +98,7 @@ class Tassametro:
             self.io_movements_logger.info(f"{gift.time} - Price not found for Gift {gift.asset}   ")
             self.portfolio.add(gift.asset, 0, gift.time)
         else:
+            self.total_sold += converted.amount
             self.capital_gain += converted.amount
             self.portfolio.add(gift.asset, converted.amount / gift.asset.amount, gift.time)
             self.io_movements_logger.info(f"{gift} - price: {converted.amount / gift.asset.amount} - capital gain: {converted.amount}")
@@ -117,7 +121,6 @@ class Tassametro:
             # the fee must be exchanged to 'currency' end the expense is subject to taxation like any other
             # we will pocess the syntethic trade after adding the bought asset ( as sometimes the fee is payed in the bought asset )
             syntethicTrade = ExchangeOperation(trade.fee,  fee_in_currency, self.null_amount, trade.time)
-        self.fee_paid += fee_in_currency.amount
 
         # a trade is subject to taxation if the asset bought is 'currency'
         # bought asset is added to portfolio
@@ -127,17 +130,20 @@ class Tassametro:
         if trade.bought.symbol in ["EUR", "USD", "USDT", "USDC", "BUSD", "DAI"]:
             # in this case the transaction is subject to taxation
             # then the we need to calculate capital gain
-            if self.deduce_fee:
-                self.capital_gain -= fee_in_currency.amount
+
             # add the bought asset to the portfolio
             bought_in_currency = self.prices.convert(trade.bought, self.currency, trade.time)
             # the bought asset is added with its actual price in 'currency'
             self.portfolio.add(trade.bought, bought_in_currency.amount / trade.bought.amount, trade.time)
             # calculate the capital gain
             price_in_currency = bought_in_currency.amount / trade.sold.amount
+            if self.deduce_fee:
+                price_in_currency = price_in_currency + fee_in_currency.amount / trade.sold.amount
             for soldPos in sold_positions:
                 # calculate the load price in 'currency'
                 self.capital_gain += soldPos.amount * (price_in_currency - soldPos.price)
+                self.total_bought += soldPos.amount * soldPos.price
+                self.total_sold += soldPos.amount * price_in_currency
         else:
             for soldPos in sold_positions:
                 if soldPos.amount == 0:
@@ -149,20 +155,21 @@ class Tassametro:
 
                 spent_in_currency = soldPos.amount * soldPos.price
                 if self.deduce_fee:
-                    if self.include_fee_in_price:
-                        # calculate the load price in 'currency' ( which includes the fee )
-                        spent_in_currency += fee_pertinent.amount
-                    else:
-                        self.capital_gain -= fee_pertinent.amount
+                    # calculate the load price in 'currency' ( which includes the fee )
+                    spent_in_currency += fee_pertinent.amount
+
                 bought_pertinent = trade.bought.amount * (soldPos.amount / trade.sold.amount)
                 price_in_currency = spent_in_currency / bought_pertinent
 
                 # add the bought asset to the portfolio
                 self.portfolio.add(AssetAmount(trade.bought.symbol, bought_pertinent), price_in_currency, trade.time)
+
         # finally process the syntethic trade
         if syntethicTrade is not None:
             self.process_trade(syntethicTrade)
             self.portfolio.remove(fee_in_currency)
+        # account for the fee paid
+        self.fee_paid += fee_in_currency.amount
 
     def process_fee_payment(self, fee: FeePayment):
         # the amount converted to 'currency' and deducted from capital gains
@@ -173,7 +180,7 @@ class Tassametro:
         self.fee_paid += fee_in_currency.amount
         if self.deduce_fee:
             self.capital_gain -= fee_in_currency.amount
-
+            self.total_bought += fee_in_currency.amount
     def process_margin_loan(self, ml: MarginLoan):
         converted = self.prices.convert(ml.asset, self.currency, ml.time)
         price = converted.amount / ml.asset.amount

@@ -92,7 +92,7 @@ class Portfolio:
         return result
 
     def print(self):
-        print("Portfolio:")
+        print("------- Remaining portfolio -------")
         print("   " + str(self.currency))
         for li in self.positions.values():
             for p in li:
