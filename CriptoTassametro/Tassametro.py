@@ -40,9 +40,15 @@ class Tassametro:
         self.deduce_fee = deduce_fee
         self.end_of_day_prices_for_fees = end_of_day_prices_for_fees
         self.fee_paid = 0
+        self.IC_positions : list[Position] = [] # positions to calculate the IC tax
+        """IC positions gathers all the positions that are subject to the IC tax but
+           do not appear in initial positions or final potisions.
+           So these are those that have been created and liquidate during the year.
 
+        """
     def print_state(self) -> None:
         self.portfolio.print()
+        print("")
         print(f"----- Capital Gain Report -----")
         print(f"Total bought: {self.total_bought} {self.currency}")
         print(f"Total sold: {self.total_sold} {self.currency}")
@@ -72,10 +78,12 @@ class Tassametro:
             if asset_in_currency is None or asset_in_currency.amount is None:
                 print(f"{withdraw.time} - Price not found for Withdrawal {withdraw.asset}")
                 self.io_movements_logger.info(f"{withdraw.time} - Price not found for Withdrawal {withdraw.asset} ")
-                self.portfolio.remove(withdraw.asset)
+                pos = self.portfolio.remove(withdraw.asset)
+                #pos.closing_time = withdraw.time
+                #self.IC_positions.append(pos)
                 return
             if asset_in_currency.amount == 0:
-                print(f"Unable to remove {withdraw.asset} from portfolio")
+                print(f"{withdraw.time} - Unable to convert {withdraw.asset} to {self.currency} - manual calculation needed")
                 return
             # create a synthetic trade
             trade = ExchangeOperation(withdraw.asset, asset_in_currency, self.null_amount, withdraw.time)
@@ -83,7 +91,11 @@ class Tassametro:
             self.process_withdrawal(Withdrawal(asset_in_currency.symbol, asset_in_currency.amount, withdraw.time), logIt=False)
         else:
             # just remove the amount from the portfolio
-            self.portfolio.remove(withdraw.asset)
+            removedPositions = self.portfolio.remove(withdraw.asset)
+            for pos in removedPositions:
+                pos.closing_time = withdraw.time
+                self.IC_positions.append(pos)
+            
         if logIt:
             self.io_movements_logger.info(f'{withdraw} - capital gain: {self.capital_gain - initial_cap_gain}')
 
@@ -181,6 +193,7 @@ class Tassametro:
         if self.deduce_fee:
             self.capital_gain -= fee_in_currency.amount
             self.total_bought += fee_in_currency.amount
+    
     def process_margin_loan(self, ml: MarginLoan):
         converted = self.prices.convert(ml.asset, self.currency, ml.time)
         price = converted.amount / ml.asset.amount

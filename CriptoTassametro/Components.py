@@ -95,8 +95,9 @@ class Position:
     amount: float  # asset amount
     price: float
     creationTime: datetime
-    '''price of the position [ eur / asset ]'''
+    closing_time: datetime = None
 
+    '''price of the position [ eur / asset ]'''
     def value(self) -> float:
         return self.amount * self.price
 
