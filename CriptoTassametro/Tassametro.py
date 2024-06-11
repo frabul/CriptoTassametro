@@ -46,6 +46,10 @@ class Tassametro:
            So these are those that have been created and liquidate during the year.
 
         """
+        
+    def is_in_period(self, time: dt) -> bool:
+        return self.startTime <= time and time <= self.endTime
+    
     def print_state(self) -> None:
         self.portfolio.print()
         print("")
@@ -110,8 +114,9 @@ class Tassametro:
             self.io_movements_logger.info(f"{gift.time} - Price not found for Gift {gift.asset}   ")
             self.portfolio.add(gift.asset, 0, gift.time)
         else:
-            self.total_sold += converted.amount
-            self.capital_gain += converted.amount
+            if self.is_in_period(gift.time):
+                self.total_sold += converted.amount
+                self.capital_gain += converted.amount 
             self.portfolio.add(gift.asset, converted.amount / gift.asset.amount, gift.time)
             self.io_movements_logger.info(f"{gift} - price: {converted.amount / gift.asset.amount} - capital gain: {converted.amount}")
 
@@ -147,15 +152,16 @@ class Tassametro:
             bought_in_currency = self.prices.convert(trade.bought, self.currency, trade.time)
             # the bought asset is added with its actual price in 'currency'
             self.portfolio.add(trade.bought, bought_in_currency.amount / trade.bought.amount, trade.time)
-            # calculate the capital gain
-            price_in_currency = bought_in_currency.amount / trade.sold.amount
-            if self.deduce_fee:
-                price_in_currency = price_in_currency + fee_in_currency.amount / trade.sold.amount
-            for soldPos in sold_positions:
-                # calculate the load price in 'currency'
-                self.capital_gain += soldPos.amount * (price_in_currency - soldPos.price)
-                self.total_bought += soldPos.amount * soldPos.price
-                self.total_sold += soldPos.amount * price_in_currency
+            # only consider the capital gain if the trade is in the period of interest
+            if self.is_in_period(trade.time): 
+                price_in_currency = bought_in_currency.amount / trade.sold.amount
+                if self.deduce_fee:
+                    price_in_currency = price_in_currency + fee_in_currency.amount / trade.sold.amount
+                for soldPos in sold_positions:
+                    # calculate the load price in 'currency'
+                    self.capital_gain += soldPos.amount * (price_in_currency - soldPos.price)
+                    self.total_bought += soldPos.amount * soldPos.price
+                    self.total_sold += soldPos.amount * price_in_currency
         else:
             for soldPos in sold_positions:
                 if soldPos.amount == 0:
@@ -190,7 +196,7 @@ class Tassametro:
         self.process_trade(synthetic_trade)
         self.portfolio.remove(fee_in_currency)
         self.fee_paid += fee_in_currency.amount
-        if self.deduce_fee:
+        if self.deduce_fee and self.is_in_period(fee.time):
             self.capital_gain -= fee_in_currency.amount
             self.total_bought += fee_in_currency.amount
     
