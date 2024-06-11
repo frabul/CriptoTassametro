@@ -53,6 +53,15 @@ class HistoryEntryType(Enum):
     Token_Swap_Rebranding = 'Token Swap - Redenomination/Rebranding'
     Fiat_Deposit = 'Fiat Deposit'
     Crypto_Box = 'Crypto Box'
+    Commission_History = 'Commission History'
+    Swap_Farming_Transaction = 'Swap Farming Transaction'
+    Liquid_Swap_Sell = 'Liquid Swap Sell'
+    Liquid_Swap_Add = 'Liquid Swap Add'
+    Commission_Rebate = 'Commission Rebate'
+    Staking_Purchase = 'Staking Purchase'
+    Staking_Redemption = 'Staking Redemption'
+    Token_Swap_Distribution = 'Token Swap - Distribution'
+    
     @staticmethod
     def contains(value):
         return value in HistoryEntryType.__members__.keys()
@@ -189,11 +198,14 @@ class BinanceHistoryParser:
     exchange_sell_types = [HistoryEntryType.Sell,
                            HistoryEntryType.Transaction_Sold,
                            HistoryEntryType.Transaction_Spend]
+
     exchange_buy_types = [HistoryEntryType.Buy,
                           HistoryEntryType.Transaction_Buy,
                           HistoryEntryType.Transaction_Revenue]
+
     exchange_fee_types = [HistoryEntryType.Fee,
                           HistoryEntryType.Transaction_Fee]
+
     gift_operation_types = [HistoryEntryType.Binance_Card_Cashback,
                             HistoryEntryType.Swap_Farming_Rewards,
                             HistoryEntryType.Mission_Reward_Distribution,
@@ -201,8 +213,14 @@ class BinanceHistoryParser:
                             HistoryEntryType.Simple_Earn_Flexible_Interest,
                             HistoryEntryType.Airdrop_Assets,
                             HistoryEntryType.Staking_Rewards,
-                            HistoryEntryType.Crypto_Box
+                            HistoryEntryType.Crypto_Box,
+                            HistoryEntryType.Commission_History,
+                            HistoryEntryType.Swap_Farming_Transaction,
+                            HistoryEntryType.Commission_Rebate,
+                            HistoryEntryType.Staking_Redemption,
+                            HistoryEntryType.Token_Swap_Distribution
                             ]
+    
     ignore_types = [HistoryEntryType.Asset_Recovery,
                     HistoryEntryType.Sub_account_Transfer,
                     HistoryEntryType.Transfer_Between_Main_and_Funding_Wallet,
@@ -212,6 +230,7 @@ class BinanceHistoryParser:
                     HistoryEntryType.Transfer_Between_Main_Account_and_Margin_Account,
                     HistoryEntryType.Small_Assets_Conversion_for_Liquidation
                     ]
+    
     exchange_entries_types = exchange_buy_types + \
         exchange_sell_types + exchange_fee_types
     combinations_cache = {}
@@ -370,8 +389,6 @@ class BinanceHistoryParser:
         buysTaken = []
         sellsTaken = []
 
-        
-      
         if len(buys) == 1:
             self.emit_operation(
                 ExchangeEntryCombination(buys[0], sells[0], None, 0).to_operation())
@@ -449,10 +466,10 @@ class BinanceHistoryParser:
             elif e.operation == HistoryEntryType.Distribution:
                 if ' to ' in e.remark and e.change > 0:
                     self.emit_operation(Deposit(e.coin, e.change, e.utc_time))  # coin swapped to
-                elif 'drop' in e.remark and e.change > 0: # airdrop
+                elif 'drop' in e.remark and e.change > 0:  # airdrop
                     self.emit_operation(GiftOperation(e.coin, e.change, e.utc_time))
                 elif e.change > 0:
-                    self.emit_operation(Deposit(e.coin, e.change, e.utc_time))   
+                    self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
                 else:
                     self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
             elif e.operation == HistoryEntryType.Simple_Earn_Flexible_Subscription:
@@ -460,6 +477,9 @@ class BinanceHistoryParser:
                 self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time))
             elif e.operation == HistoryEntryType.Simple_Earn_Flexible_Redemption:
                 self.emit_operation(Deposit(e.coin, e.change, e.utc_time))
+            elif e.operation == [ HistoryEntryType.Liquid_Swap_Sell, HistoryEntryType.Staking_Purchase]:
+                assert e.change < 0
+                self.emit_operation(Withdrawal(e.coin, -e.change, e.utc_time)) 
             else:
                 self.buffer.append(e)  # reinsert the entry in the buffer
 
@@ -484,7 +504,8 @@ def parse_files(files: list[str], max_lines=None) -> list[HistoryEntry]:
 
 
 class Wallet:
-    ''' A container of assets ''' 
+    ''' A container of assets '''
+
     def __init__(self) -> None:
         self.assets: dict[str, AssetAmount] = {}
 
@@ -494,10 +515,9 @@ class Wallet:
         else:
             self.assets[asset.symbol] = asset
 
-    def print(self, min_amount = 1e-9) -> None:
-        assets : list[AssetAmount] = [asset for asset in self.assets.values()]
+    def print(self, min_amount=1e-9) -> None:
+        assets: list[AssetAmount] = [asset for asset in self.assets.values()]
         assets.sort(key=lambda x: x.amount, reverse=True)
         for asset in assets:
             if abs(asset.amount) > min_amount:
                 print(asset)
-
