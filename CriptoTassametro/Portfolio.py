@@ -98,3 +98,43 @@ class Portfolio:
             for p in li:
                 if abs(p.amount) > 1e-3:
                     print("   " + str(p))
+
+    def copy(self) -> "Portfolio":
+        '''returns a copy of the portfolio'''
+        newPortfolio = Portfolio(self.currency.symbol)
+        newPortfolio.currency.amount = self.currency.amount
+        for sym, posList in self.positions.items():
+            for pos in posList:
+                newPortfolio.add(AssetAmount(pos.symbol, pos.amount), pos.price, pos.creationTime)
+        return newPortfolio
+    
+    def save(self, filename: str):
+        '''seralizes the portfolio to a file'''
+        import json
+        with open(filename, 'w') as f:
+            data = {
+                'currency': self.currency.symbol,
+                'amount': self.currency.amount,
+                'positions': [
+                    {
+                        'symbol': pos.symbol,
+                        'amount': pos.amount,
+                        'price': pos.price,
+                        'creationTime': pos.creationTime.isoformat()
+                    } for posList in self.positions.values() for pos in posList
+                ]
+            }
+            json.dump(data, f, indent=4)
+        print(f"Portfolio saved to {filename}")
+
+    @staticmethod 
+    def load(filename: str):
+        '''loads the portfolio from a file'''
+        import json
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        portfolio = Portfolio(data['currency'])
+        portfolio.currency.amount = data['amount']
+        for pos in data['positions']:
+            portfolio.add(AssetAmount(pos['symbol'], pos['amount']), pos['price'], dt.fromisoformat(pos['creationTime']))
+        return portfolio
