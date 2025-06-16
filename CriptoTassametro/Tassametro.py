@@ -58,6 +58,9 @@ class Tassametro:
     def print_state(self) -> None:
         self.portfolio.print()
         print("")
+        self.print_capital_gain_report()
+    
+    def print_capital_gain_report(self):
         print(f"----- Capital Gain Report -----")
         print(f"Total bought: {self.total_bought} {self.currency}")
         print(f"Total sold: {self.total_sold} {self.currency}")
@@ -112,7 +115,7 @@ class Tassametro:
             self.io_movements_logger.info(f'{withdraw} - capital gain: {self.capital_gain - initial_cap_gain}')
 
     def process_gift(self, gift: GiftOperation):
-        # a gift is not subject to taxation
+        # a gift is subject to taxation
         # the amount is added to the portfolio
         # the load price is set to the current price in 'currency'
         # the capital gain is increased by the value in 'currency' of the asset ( amout * priceInCurrency )
