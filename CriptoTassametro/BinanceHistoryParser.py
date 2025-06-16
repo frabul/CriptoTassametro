@@ -39,6 +39,7 @@ class HistoryEntryType(Enum):
     Transfer_Between_Main_Account_and_Futures_Account = "Transfer Between Main Account and Futures Account"
     Transfer_Between_Spot_Account_and_C2C_Account = "Transfer Between Spot Account and C2C Account"
     Transfer_Between_Main_Account_and_Margin_Account = "Transfer Between Main Account/Futures and Margin Account"
+    Transfer_Between_Main_Account_and_Sub_Account = "Transfer Between Main Account and Sub-Account"
     Funding_Fee = "Funding Fee"
     Margin_Repayment = "Margin Repayment"
     Simple_Earn_Flexible_Subscription = "Simple Earn Flexible Subscription"
@@ -61,6 +62,7 @@ class HistoryEntryType(Enum):
     Staking_Purchase = 'Staking Purchase'
     Staking_Redemption = 'Staking Redemption'
     Token_Swap_Distribution = 'Token Swap - Distribution'
+    Tax_Liquidation = 'Tax Liquidation'
     
     @staticmethod
     def contains(value):
@@ -228,7 +230,8 @@ class BinanceHistoryParser:
                     HistoryEntryType.Transfer_Between_Main_Account_and_Futures_Account,
                     HistoryEntryType.Transfer_Between_Spot_Account_and_C2C_Account,
                     HistoryEntryType.Transfer_Between_Main_Account_and_Margin_Account,
-                    HistoryEntryType.Small_Assets_Conversion_for_Liquidation
+                    HistoryEntryType.Small_Assets_Conversion_for_Liquidation,
+                    HistoryEntryType.Transfer_Between_Main_Account_and_Sub_Account,
                     ]
     
     exchange_entries_types = exchange_buy_types + \
@@ -255,17 +258,19 @@ class BinanceHistoryParser:
                 self.process_small_assets_exchange_operations()
                 self.process_simple_operations()
                 if len(self.buffer) > 0:
-                    raise ValueError("Buffer not empty")
+                    raise ValueError(f"Buffer not empty at {self.buffer[-1].utc_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
                 print(f"Processed {self.current_entry} ({date})  of {fileName}")
                 # add operations to db
-                self.operations_db.add_operations(self.new_operations)
-                self.operations_db.set_parsed(fileName, self.current_entry)
-                self.operations_db.save()
-                self.new_operations.clear()
+                if len(self.new_operations) > 30:
+                    self.operations_db.add_operations(self.new_operations)
+                    self.operations_db.set_parsed(fileName, self.current_entry)
+                    self.operations_db.save()
+                    self.new_operations.clear()
             except Exception as e:
                 print(f"Exception processing at {date}: {e}")
                 raise e
+        print(f"Finished processing {self.current_entry} entries from {fileName}")
 
     def load_buffer(self):
         if len(self.entries) < 1:
@@ -425,7 +430,7 @@ class BinanceHistoryParser:
         buffer = list(self.buffer)
         self.buffer.clear()
         for e in buffer:
-            if e.operation == HistoryEntryType.Withdraw:
+            if e.operation == HistoryEntryType.Withdraw or e.operation == HistoryEntryType.Tax_Liquidation:
                 assert e.change < 0
                 self.emit_operation(
                     Withdrawal(e.coin, -e.change, e.utc_time))
