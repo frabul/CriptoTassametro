@@ -205,9 +205,15 @@ class PriceProvider:
 
         symbOnBtc_price = self.get_price(Symbol(asset.symbol, "BTC"), time)
         destinationAssetonBtc_price = self.get_price(Symbol(destinationAsset, "BTC"), time)
-        if symbOnBtc_price is None or destinationAssetonBtc_price is None:
-            return None
-        return AssetAmount(destinationAsset, asset.amount * symbOnBtc_price / destinationAssetonBtc_price)
+        if symbOnBtc_price is not None and destinationAssetonBtc_price is not None:
+            return AssetAmount(destinationAsset, asset.amount * symbOnBtc_price / destinationAssetonBtc_price)
+
+        # get price on USDT
+        symbOnUsdt_price = self.get_price(Symbol(asset.symbol, "USDT"), time)
+        destinationAssetonUsdt_price = self.get_price(Symbol(destinationAsset, "USDT"), time)
+        if symbOnUsdt_price is not None and destinationAssetonUsdt_price is not None:
+            return AssetAmount(destinationAsset, asset.amount * symbOnUsdt_price / destinationAssetonUsdt_price)
+
 
 
 known_symbols = set([
